@@ -49,7 +49,7 @@ app.get('/protected', verifyToken, async (req, res) => {
   // Optional: fetch data for this client from DB
   try {
     const result = await pool.query(
-      'SELECT * FROM some_data WHERE client_id = $1',
+      'SELECT * FROM clients WHERE client_id = $1',
       [clientId]
     );
 
