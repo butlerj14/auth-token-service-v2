@@ -13,6 +13,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(bodyParser.json());
 
+// Rate limiting for token endpoint
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10 // limit each IP to 10 requests per minute
@@ -22,9 +23,10 @@ app.use('/get-auth-token', limiter);
 // PostgreSQL connection pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // Render internal DB still requires SSL
+  ssl: { rejectUnauthorized: false }
 });
 
+// Middleware to verify JWT
 function verifyToken(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -36,33 +38,32 @@ function verifyToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.tokenPayload = decoded; // Makes the token payload available to the handler
+    req.tokenPayload = decoded;
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: 'Token verification failed' });
   }
 }
 
+// Protected endpoint example
 app.get('/protected', verifyToken, async (req, res) => {
   const clientId = req.tokenPayload.client_id;
 
-  // Optional: fetch data for this client from DB
   try {
     const result = await pool.query(
       'SELECT * FROM clients WHERE client_id = $1',
       [clientId]
     );
-
     res.json({ data: result.rows });
   } catch (error) {
     res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
-
-// GET AUTH TOKEN
+// Issue a short-lived JWT
 app.post('/get-auth-token', async (req, res) => {
   const { client_id, shared_secret } = req.body;
+
   if (!client_id || !shared_secret) {
     return res.status(400).json({ error: 'Missing client_id or shared_secret' });
   }
@@ -81,13 +82,11 @@ app.post('/get-auth-token', async (req, res) => {
     const apiKey = client.api_key;
     const halfApiKey = apiKey.substring(0, 16);
 
-    // Create JWT payload
     const tokenPayload = {
       client_id,
       half_api_key: halfApiKey
     };
 
-    // Sign the JWT with your shared secret
     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
 
     res.json({ token: `Bearer ${token}` });
@@ -96,8 +95,7 @@ app.post('/get-auth-token', async (req, res) => {
   }
 });
 
-
-// ADD/UPDATE CLIENT (admin protected)
+// Admin-only: add or update a client
 app.post('/add-client', async (req, res) => {
   const { client_id, api_key, shared_secret, admin_secret } = req.body;
 
